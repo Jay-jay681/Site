@@ -1,70 +1,47 @@
-from django.db import models 
-from django.contrib.auth.models import BaseUserManager ,AbstractBaseUser,PermissionsMixin
+import uuid
 
+from django.contrib.auth.base_user import AbstractBaseUser, BaseUserManager
+from django.contrib.auth.models import PermissionsMixin
+from django.core.validators import RegexValidator
+from django.db import models
+from django.utils import timezone
 
-class UserManager(BaseUserManager):
+phone_validator = RegexValidator(r"^\+[1-9]\d{7,14}$",
+                                 "Use international format,eg +23480123456789"
+                                )
 
-    def create_user(self, phone, password=None, **extra_fields):
+class UserManger(BaseUserManager):
+    def create_user(self,phone, password=None, **extra_fields):
         if not phone:
-            raise ValueError("phone number must be set")
-
-        if self.model.objects.filter(phone=phone).exists():
-            raise ValueError("A user with this phone number already exists")
-
-        user = self.model(
-            phone=phone,
-            **extra_fields
-        )
-
+            raise ValueError("Phone Number is required")
+        user = self.model(phone=phone, **extra_fields)
         user.set_password(password)
-        user.save(using=self._db)
-
-        return user
-
-    def create_superuser(self, phone, password=None, **extra_fields):
-        extra_fields.setdefault("is_staff", True)
-        extra_fields.setdefault("is_superuser", True)
-        extra_fields.setdefault("is_active", True)
+        user.save()
         
-
-        if extra_fields.get("is_staff") is not True:
-            raise ValueError("Superuser must have is_staff=True")
-
-        if extra_fields.get("is_superuser") is not True:
-            raise ValueError("Superuser must have is_superuser=True")
-
-        return self.create_user(
-            phone=phone,
-            password=password,
-            **extra_fields
-        )
-     
-class CustomUser(AbstractBaseUser, PermissionsMixin):
-    class Role(models.TextChoices):
-        SITEADMIN = "SITEADMIN" , "Site admin"
-        SUPERVISORS = "SUPERVISORS", "Supervisors"
-        WORKER = "WORKER", "site worker"
         
-    sitename = models.CharField(max_length=128, unique=True)
-    name = models.CharField(max_length=128 , unique=True, )
-    email = models.EmailField(max_length=120, unique=True, blank=True, null=True)
-    phone = models.CharField(max_length=120 , unique=True)
-    role = models.CharField(max_length=20, choices=Role , default=Role.SITEADMIN)
-    is_staff = models.BooleanField(default= True)
-    is_active = models.BooleanField(default=False)
+    def create_superuser(self,phone, password, **extra_fields):
+        extra_fields["is_staff"] = True
+        extra_fields["is_superuser"] = True
+        
+        return self.create_user(phone, password, **extra_fields)
     
-    objects = UserManager()
+class CustomUser(AbstractBaseUser):
+    id = models.UUIDField(primary_key=True , default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=120,null=True, blank=True)
+    email =  models.EmailField(max_length=100,  unique=True)
+    phone = models.CharField(validators=[phone_validator] , unique=True)
     
-    USERNAME_FIELDS = "phone"
-    REQUIRED_FIELDS = ["name"]
+    is_active = models.BooleanField(default=True)
+    is_staff = models.BooleanField(default=False)
+    date_joined = models.DateTimeField(auto_now_add=True)
     
+    objects = UserManger()
     
-    class Meta:
-        db_table = "USERS"
-        indexes = [
-            models.Index(fields=["name", "is_active", "sitename"]),
-        ]
+    USERNAME_FIELD = "phone"
+    REQUIRED_FIELDS = ["first_name", "last_name"]
 
     def __str__(self):
-        return f"{self.phone} and {self.sitename}"
+        return f"{self.first_name} {self.last_name} ({self.phone})"
+    
+                    
     
