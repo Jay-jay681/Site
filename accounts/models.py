@@ -104,6 +104,9 @@ class CustomUser(AbstractBaseUser,  PermissionsMixin):
     pin_hash= models.CharField(max_length=128, blank=True)
     pin_failed_attempts = models.PositiveSmallIntegerField(default=0)
     pin_lockdown = models.DateTimeField(null=True, blank=True)
+    
+        # token revocation
+    token_version = models.PositiveIntegerField(default=0)
     class Meta:
         constraints = [models.UniqueConstraint(
             fields=["organisation", "employee_id"],
@@ -135,6 +138,11 @@ class CustomUser(AbstractBaseUser,  PermissionsMixin):
             self.pin_failed_attempts = 0
         self.save(update_fields=["pin_failed_attempts", "pin_lockdown"])
         return False
+    
+    # code revocation
+    def revoke_all_tokens(self):
+        CustomUser.objects.filter(pk=self.pk).update(token_version=models.F("token_version") + 1)
+        self.refresh_from_db(fields=["token_version"])
         
     objects = UserManger()
     
