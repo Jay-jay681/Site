@@ -221,6 +221,10 @@ def change_pin(request, payload: ChangePIN):
 @router.get("/me", response={200:Profile} , auth=JwtAuth())
 def profile(request):
     return 200 , request.user
+
+@router.post("/revoke", response ={200:MessageSchema},auth=JwtAuth())
+def revoke_token(request):
+    user = request.user
 #   "refresh": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1MGUwMmEzNS1hZTdkLTQyYzAtODE3NC0xY2FmNTVkNGYzNmYiLCJ0b2tlbl90eXBlIjoicmVmcmVzaCIsInZlciI6MCwiaWF0IjoxNzkxMTk5NTk5LCJleHAiOjE3OTM3OTE1OTl9.OJUehiW2dSTdbkaPkfUiHq62QJOcl8BylG-nlFNEq3w",
 #   "access": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1MGUwMmEzNS1hZTdkLTQyYzAtODE3NC0xY2FmNTVkNGYzNmYiLCJ0b2tlbl90eXBlIjoiYWNjZXNzIiwidmVyIjowLCJpYXQiOjE3OTExOTk1OTksImV4cCI6MTc5MjA5OTU5OX0.81WcwMogUAyj9tH0_VKGe0K8y84c-F3IwpgsIcPwTUQ"
 # }

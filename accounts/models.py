@@ -165,7 +165,8 @@ class SiteLinks(models.Model):
     
     
     class Meta:
-        constraints = [models.UniqueConstraint(fields=["user", "site", "roles"],  name="unique_role_per_user_per_site")]
+        constraints = [
+            models.UniqueConstraint(fields=["user", "site", "roles"],  name="unique_role_per_user_per_site")]
     
     
     

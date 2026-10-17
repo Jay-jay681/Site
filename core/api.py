@@ -2,6 +2,7 @@ from django.db import connection
 from ninja import NinjaAPI
 
 from accounts.api import router as accounts_router
+from access.api import router as access_router
 
 api = NinjaAPI(title="SiteFlow API", version="0.1.0")
 
@@ -18,3 +19,4 @@ def health(request):
         return {"status": "degraded", "database": "down"}
     
 api.add_router("/" , accounts_router)
+api.add_router("/", access_router)
