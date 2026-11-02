@@ -1,9 +1,11 @@
 from time import timezone
-
+from uuid import UUID
 from django.contrib.admin import site
 from ninja import Router
 
 from accounts.access.bodycode import operator_site
+from certifications.api import certification
+from certifications.models import CertificationResponse
 from .schema import LiveBoardSchema,AttendanceRecordSchema, ManualAttendanceRecordSchema,MessageSchema,AttendanceRecordSchemaIn
 from .models import AttendanceRecord
 from core.authentication import JwtAuth
@@ -17,9 +19,6 @@ router = Router(tags=["Access Record"])
 def recording_worker_in(request , payload:AttendanceRecordSchemaIn):
     operator = request.user
     site = operator_site(operator, payload.site_id)
-        
-    if site is None:
-        return 404 , {"message": "site not found"}
     
     worker = CustomUser.objects.filter(employee_id=payload.employee_id, organisation=operator.organisation, is_active=True).first()
     
@@ -33,6 +32,16 @@ def recording_worker_in(request , payload:AttendanceRecordSchemaIn):
     if not worker.check_pin(payload.pin):
         return 403, {"message": "Employee ID or PIN incorrect"}
 
+    certification = CertificationResponse.objects.filter(name = worker, certification__organisation = operator.organisation, is_active=True).first()
+    
+    if not certification:
+        return 403, {"message": "You do not have a valid certification"}
+    
+    if certification.expiration_date < timezone.now():
+            return 403, {"message": "Your certificate has expired"}
+    if certification.status != "APPROVED":
+        return 403, {"message": "Your certification is not approved yet"}
+    
     try:
         with transaction.atomic():
             site = Site.objects.select_for_update().get(id = site.id)
@@ -87,9 +96,6 @@ def recording_worker_out(request , payload:AttendanceRecordSchemaIn):
             
     return 200, record
     
-    
-    
-from uuid import UUID
 
 
 @router.get(
