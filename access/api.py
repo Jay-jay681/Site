@@ -1,9 +1,9 @@
 from datetime import timedelta
-from time import timezone
 from uuid import UUID
 from django.contrib.admin import site
 from ninja import Router
 
+from django.utils import timezone
 from accounts.access.bodycode import operator_site
 from certifications.api import certification
 from certifications.models import Certification, CertificationResponse
