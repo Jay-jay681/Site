@@ -1,3 +1,4 @@
+from datetime import timedelta
 from time import timezone
 from uuid import UUID
 from django.contrib.admin import site
@@ -5,7 +6,8 @@ from ninja import Router
 
 from accounts.access.bodycode import operator_site
 from certifications.api import certification
-from certifications.models import CertificationResponse
+from certifications.models import Certification, CertificationResponse
+from scheduling.models import Schedule
 from .schema import LiveBoardSchema,AttendanceRecordSchema, ManualAttendanceRecordSchema,MessageSchema,AttendanceRecordSchemaIn
 from .models import AttendanceRecord
 from core.authentication import JwtAuth
@@ -15,7 +17,7 @@ from django.db import transaction ,IntegrityError
 
 router = Router(tags=["Access Record"])
 
-@router.post("/clock-in", response={201:AttendanceRecordSchema, 400:MessageSchema} , auth=[SupervisorOnly()])
+@router.post("/clock-in", response={201:AttendanceRecordSchema, 400:MessageSchema} , auth=[SupervisorOnly(), platformAdminOnly()])
 def recording_worker_in(request , payload:AttendanceRecordSchemaIn):
     operator = request.user
     site = operator_site(operator, payload.site_id)
@@ -32,15 +34,49 @@ def recording_worker_in(request , payload:AttendanceRecordSchemaIn):
     if not worker.check_pin(payload.pin):
         return 403, {"message": "Employee ID or PIN incorrect"}
 
-    certification = CertificationResponse.objects.filter(name = worker, certification__organisation = operator.organisation, is_active=True).first()
+    # certification = CertificationResponse.objects.filter(name = worker, certification__organisation = operator.organisation, is_active=True).first()
     
-    if not certification:
-        return 403, {"message": "You do not have a valid certification"}
+    # if not certification:
+    #     return 403, {"message": "You do not have a valid certification"}
     
-    if certification.expiration_date < timezone.now():
-            return 403, {"message": "Your certificate has expired"}
-    if certification.status != "APPROVED":
-        return 403, {"message": "Your certification is not approved yet"}
+    # if certification.expiration_date < timezone.now():
+    #         return 403, {"message": "Your certificate has expired"}
+    # if certification.status != "APPROVED":
+    #     return 403, {"message": "Your certification is not approved yet"}
+    
+    
+    if worker.trade:
+        required_types = Certification.objects.filter(
+            organisation=worker.organisation,
+            required_for_trade=worker.trade,
+            is_active=True,
+        )
+
+        for cert_type in required_types:
+            has_valid = CertificationResponse.objects.filter(
+                name=worker,
+                certification=cert_type,
+                status=CertificationResponse.Status.APPROVED,
+                expiration_date__gt=timezone.now(),
+                is_active=True,
+            ).exists()
+
+            if not has_valid:
+                return 403, {"message": f"Your {cert_type.name} certificate is missing, not approved or expired"}
+            
+    now = timezone.now()
+    early_allowance = timedelta(minutes=30)
+
+    has_shift = Schedule.objects.filter(
+        site=site,
+        is_active=True,
+        assignments__user=worker,
+        start_time__lte=now + early_allowance,
+        end_time__gte=now,
+    ).exists()
+
+    if not has_shift:
+        return 403, {"message": "No shift for you at this site right now"}
     
     try:
         with transaction.atomic():
@@ -66,7 +102,7 @@ def recording_worker_in(request , payload:AttendanceRecordSchemaIn):
     return 201, record
 
 
-@router.post("/clock-out", response={200:AttendanceRecordSchema, 400:MessageSchema,403: MessageSchema, 404: MessageSchema} , auth=[SupervisorOnly()])
+@router.post("/clock-out", response={200:AttendanceRecordSchema, 400:MessageSchema,403: MessageSchema, 404: MessageSchema} , auth=[SupervisorOnly(),platformAdminOnly()])
 def recording_worker_out(request , payload:AttendanceRecordSchemaIn):
     operator = request.user
     site = operator_site(operator, payload.site_id)
