@@ -17,7 +17,7 @@ from django.db import transaction ,IntegrityError
 
 router = Router(tags=["Access Record"])
 
-@router.post("/clock-in", response={201:AttendanceRecordSchema, 400:MessageSchema} , auth=[SupervisorOnly(), platformAdminOnly()])
+response={201: AttendanceRecordSchema, 400: MessageSchema, 403: MessageSchema, 404: MessageSchema}
 def recording_worker_in(request , payload:AttendanceRecordSchemaIn):
     operator = request.user
     site = operator_site(operator, payload.site_id)
