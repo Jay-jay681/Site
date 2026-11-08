@@ -1,11 +1,12 @@
 """
-Tests for the clock-in certificate check.
+Tests for clock-in: certificates, shifts, site assignment, capacity and double clock-in.
 
-Put this file at access/tests.py (replace the empty one Django created).
-Run with:  python manage.py test access
+Put this file at access/tests.py.
+Run locally:   python manage.py test access
+CI runs it automatically with:  python manage.py test
 
-Django creates a separate, empty test database for these tests and deletes it
-afterwards, so your real data is never touched.
+Django creates a separate, empty test database and deletes it afterwards,
+so your real data is never touched.
 """
 
 from datetime import timedelta
@@ -14,15 +15,16 @@ from django.test import TestCase
 from django.utils import timezone
 from ninja.testing import TestClient
 
-from accounts.models import CustomUser, Organisation, Role, Site, SiteLinks
 from access.api import router
+from accounts.models import CustomUser, Organisation, Role, Site, SiteLinks
 from certifications.models import Certification, CertificationResponse
 from core.token import create_access_token
+from scheduling.models import Schedule, ScheduleLinks
 
 PIN = "482913"
 
 
-class ClockInCertificateTests(TestCase):
+class ClockInTests(TestCase):
     def setUp(self):
         # one company with one site
         self.org = Organisation.objects.create(
@@ -43,7 +45,18 @@ class ClockInCertificateTests(TestCase):
         token = create_access_token(self.operator)
         self.headers = {"Authorization": f"Bearer {token}"}
 
-        # the worker: a scaffolder assigned to the site, with a PIN
+        # a shift happening right now at the site
+        now = timezone.now()
+        self.shift = Schedule.objects.create(
+            name="Current shift",
+            organisation=self.org,
+            site=self.site,
+            created_by=self.operator,
+            start_time=now - timedelta(hours=1),
+            end_time=now + timedelta(hours=7),
+        )
+
+        # the main worker: a scaffolder, assigned to the site and the shift
         self.worker = self.make_worker("+2348000000002", "EMP-001", "Scaffolder")
 
         # a certificate type required for scaffolders
@@ -53,7 +66,7 @@ class ClockInCertificateTests(TestCase):
 
     # ---------- helpers ----------
 
-    def make_worker(self, phone, employee_id, trade):
+    def make_worker(self, phone, employee_id, trade, on_site=True, on_shift=True):
         worker = CustomUser.objects.create_user(
             phone=phone,
             password="SiteFlow#2026",
@@ -64,7 +77,12 @@ class ClockInCertificateTests(TestCase):
         )
         worker.set_pin(PIN)
         worker.save()
-        SiteLinks.objects.create(user=worker, site=self.site, roles=Role.WORKER)
+        if on_site:
+            SiteLinks.objects.create(user=worker, site=self.site, roles=Role.WORKER)
+        if on_shift:
+            ScheduleLinks.objects.create(
+                schedule=self.shift, user=worker, assigned_by=self.operator
+            )
         return worker
 
     def make_type(self, name, required_for_trade, is_active=True):
@@ -79,8 +97,8 @@ class ClockInCertificateTests(TestCase):
 
     def give_certificate(self, worker, cert_type, status, expires_in_days=365):
         return CertificationResponse.objects.create(
-            certification=cert_type,
             name=worker,
+            certification=cert_type,
             expiration_date=timezone.now() + timedelta(days=expires_in_days),
             type="Certificate",
             certificate_number="CERT-123",
@@ -98,7 +116,7 @@ class ClockInCertificateTests(TestCase):
             headers=self.headers,
         )
 
-    # ---------- the 10 cases ----------
+    # ---------- certificates ----------
 
     def test_1_missing_required_certificate_is_refused(self):
         response = self.clock_in(self.worker)
@@ -146,8 +164,7 @@ class ClockInCertificateTests(TestCase):
 
     def test_9_trade_case_mismatch_skips_the_check_known_gap(self):
         # KNOWN GAP: "scaffolder" != "Scaffolder", so no requirement is found.
-        # This test documents the current behaviour. When you fix case
-        # matching, change the expected code to 403.
+        # When you fix case matching, change the expected code to 403.
         worker = self.make_worker("+2348000000005", "EMP-004", "scaffolder")
         response = self.clock_in(worker)
         self.assertEqual(response.status_code, 201)
@@ -157,3 +174,46 @@ class ClockInCertificateTests(TestCase):
         self.height.save()
         response = self.clock_in(self.worker)
         self.assertEqual(response.status_code, 201)
+
+    # ---------- the other gate rules ----------
+
+    def test_11_no_shift_is_refused(self):
+        worker = self.make_worker("+2348000000006", "EMP-005", "", on_shift=False)
+        response = self.clock_in(worker)
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("No shift", response.json()["message"])
+
+    def test_12_not_assigned_to_site_is_refused(self):
+        worker = self.make_worker("+2348000000007", "EMP-006", "", on_site=False)
+        response = self.clock_in(worker)
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("not assigned", response.json()["message"])
+
+    def test_13_wrong_pin_is_refused(self):
+        response = self.client.post(
+            "/clock-in",
+            json={
+                "site_id": str(self.site.id),
+                "employee_id": self.worker.employee_id,
+                "pin": "111999",
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_14_already_clocked_in_is_refused(self):
+        worker = self.make_worker("+2348000000008", "EMP-007", "")
+        self.assertEqual(self.clock_in(worker).status_code, 201)
+        response = self.clock_in(worker)
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("already clocked in", response.json()["message"])
+
+    def test_15_full_site_is_refused(self):
+        self.site.hard_capacity = 1
+        self.site.save()
+        first = self.make_worker("+2348000000009", "EMP-008", "")
+        second = self.make_worker("+2348000000010", "EMP-009", "")
+        self.assertEqual(self.clock_in(first).status_code, 201)
+        response = self.clock_in(second)
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("full", response.json()["message"])
