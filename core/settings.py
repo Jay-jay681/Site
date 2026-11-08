@@ -30,6 +30,10 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'accounts',
+    'access',
+    'certifications',
+    'scheduling',
+    'silk',
 ]
 
 MIDDLEWARE = [
@@ -40,6 +44,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'silk.middleware.SilkyMiddleware',
 ]
 
 ROOT_URLCONF = 'core.urls'
@@ -70,7 +75,7 @@ POSTGRES_DB = os.getenv("POSTGRES_DB")
 POSTGRES_USER = os.getenv("POSTGRES_USER")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
 POSTGRES_PORT = os.getenv("POSTGRES_PORT")
-
+POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")
 
 DATABASES = {
     "default": {
@@ -78,6 +83,7 @@ DATABASES = {
         "NAME": POSTGRES_DB,
         "USER": POSTGRES_USER,
         "PASSWORD": POSTGRES_PASSWORD,
+        "HOST": POSTGRES_HOST,
         "PORT": POSTGRES_PORT,
     }
 }

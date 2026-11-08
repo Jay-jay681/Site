@@ -96,3 +96,25 @@ class Profile(Schema):
             {"site_id": link.site.id, "site_name": link.site.name, "role": link.roles}
             for link in links
         ]
+        
+        
+class SitesSchema(Schema):
+    name : str
+    address: Optional[str] = None
+    hard_capacity : int
+    timezone : Optional[str] = None
+    
+class SitesSchemaOut(Schema):
+    id: UUID
+    name : str
+    address: Optional[str] = None
+    organisation : str
+    hard_capacity : int
+    timezone : Optional[str] = None
+    
+    @staticmethod
+    def resolve_organisation(obj):
+        return obj.organisation.name if obj.organisation else None
+    
+    
+# eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1MGUwMmEzNS1hZTdkLTQyYzAtODE3NC0xY2FmNTVkNGYzNmYiLCJ0b2tlbl90eXBlIjoiYWNjZXNzIiwidmVyIjowLCJpYXQiOjE3OTIyNjE0MDEsImV4cCI6MTc5MzE2MTQwMX0.4or8m-oqZmYl0wLaBXL576PaPrgkfgKFNdSGuSAZJoI

@@ -1,16 +1,18 @@
+from typing import List
+from uuid import UUID
 from django.utils import timezone
 from ninja import Router
-from .schema import Profile, ChangePIN,PIN,Invite,InviteOut,InviteAccept, LoginOut , LoginSchema ,MessageSchema,RefreshIn, SiteOption,RoleOption
+from .schema import SitesSchema,Profile, ChangePIN,PIN,Invite,InviteOut,InviteAccept, LoginOut , LoginSchema ,MessageSchema,RefreshIn, SiteOption,RoleOption, SitesSchemaOut
 from core.token import create_access_token , create_refresh_token ,decode
 from django.contrib.auth import authenticate
-from .models import CustomUser ,Invitation ,Role, SiteLinks
+from .models import CustomUser ,Invitation ,Role, SiteLinks , Site
 from django.db import transaction ,IntegrityError
 from core.permissions import platformAdminOnly
 from core.authentication import JwtAuth    
 from core.permissions import allowed_roles, allowed_sites
 from django.contrib.auth.password_validation import validate_password
-from django.core.exceptions import ValidationError
 from .utils import is_weak_pin
+from access.models import AttendanceRecord
 
 
 # router = Router(tags="Accounts")
@@ -221,10 +223,94 @@ def change_pin(request, payload: ChangePIN):
 @router.get("/me", response={200:Profile} , auth=JwtAuth())
 def profile(request):
     return 200 , request.user
-#   "refresh": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1MGUwMmEzNS1hZTdkLTQyYzAtODE3NC0xY2FmNTVkNGYzNmYiLCJ0b2tlbl90eXBlIjoicmVmcmVzaCIsInZlciI6MCwiaWF0IjoxNzkxMTk5NTk5LCJleHAiOjE3OTM3OTE1OTl9.OJUehiW2dSTdbkaPkfUiHq62QJOcl8BylG-nlFNEq3w",
-#   "access": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1MGUwMmEzNS1hZTdkLTQyYzAtODE3NC0xY2FmNTVkNGYzNmYiLCJ0b2tlbl90eXBlIjoiYWNjZXNzIiwidmVyIjowLCJpYXQiOjE3OTExOTk1OTksImV4cCI6MTc5MjA5OTU5OX0.81WcwMogUAyj9tH0_VKGe0K8y84c-F3IwpgsIcPwTUQ"
+
+@router.post("/revoke", response ={200:MessageSchema},auth=JwtAuth())
+def revoke_token(request):
+    user = request.user
+    
+    
+@router.post("/create-site", response={201 : SitesSchemaOut , 400 : MessageSchema, 403:MessageSchema}, auth= platformAdminOnly())
+def create_site(request , payload:SitesSchema ):
+    user = request.auth
+    
+    if Site.objects.filter(name=payload.name , organisation = user.organisation).exists():
+        return 400 , {"message" : "Site with this name already exists"}
+    
+    try:
+        with transaction.atomic():
+            site = Site.objects.create(
+                name = payload.name,
+                address = payload.address , 
+                organisation = user.organisation,
+                hard_capacity = payload.hard_capacity,
+                timezone = payload.timezone,
+            )
+            
+    except IntegrityError:
+        return 400 , {"message" : "Site with this name already exists"}
+
+    return 201 , site
+
+@router.get("/site_list", response={200 : List[SitesSchemaOut]}, auth= platformAdminOnly())
+def site_list(request):
+    user = request.auth
+    
+    organisation=user.organisation
+    site = Site.objects.filter(organisation=organisation, is_active=True)
+    
+    return 200 ,site 
+
+@router.patch("/site/{site_id}/edit" , response = {200:SitesSchemaOut , 400:MessageSchema, 404:MessageSchema} , auth= platformAdminOnly())
+def edit_site(request , site_id: UUID, payload:SitesSchema):
+    user = request.auth
+
+    try:
+        with transaction.atomic():
+            
+            site = Site.objects.select_for_update().filter(
+                id=site_id, is_active=True, organisation=user.organisation
+            ).first()
+            
+            if site is None:
+                return 404, {"message": "Site not found"}
+        
+            site.name = payload.name
+            site.address = payload.address
+            site.organisation = user.organisation
+            site.hard_capacity = payload.hard_capacity
+            site.timezone = payload.timezone
+        
+            site.save()
+            
+    except IntegrityError:
+        return 400 , {"message": "site already exists"}
+    return 200 , site 
+    
+    
+@router.post("/site/{site_id}/deactivate" , response = {200:MessageSchema , 400:MessageSchema, 404:MessageSchema} , auth= platformAdminOnly())
+def deactivate_site(request , site_id: UUID):
+    user = request.auth
+    
+    site =  Site.objects.filter(id=site_id, is_active=True, organisation=user.organisation).first()
+    
+    if site is None:
+        return 404, {"message": "Site not found"}
+    
+    on_site = AttendanceRecord.objects.filter(site=site, exited_at__isnull=True).count()
+
+    if on_site > 0:
+        return 400, {"message": f"{on_site} people are still on site. Clock them out first."}
+    
+    site.is_active = False
+    site.save(update_fields=["is_active"])
+        
+    return 200 , {"message": "Site deactivated successfully"}
+
+    
+
+
+# 
+#   "refresh": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1MGUwMmEzNS1hZTdkLTQyYzAtODE3NC0xY2FmNTVkNGYzNmYiLCJ0b2tlbl90eXBlIjoicmVmcmVzaCIsInZlciI6MCwiaWF0IjoxNzkyNDQ2ODQzLCJleHAiOjE3OTUwMzg4NDN9.n6tCOnW694nzm6lNt3j1eGMj-SI_qPc9y4JoWqWy9Vc",
+#   "access": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1MGUwMmEzNS1hZTdkLTQyYzAtODE3NC0xY2FmNTVkNGYzNmYiLCJ0b2tlbl90eXBlIjoiYWNjZXNzIiwidmVyIjowLCJpYXQiOjE3OTI0NDY4NDMsImV4cCI6MTc5MzM0Njg0M30.3ZwkRyvzjt0JYojvRoTMKgzuSoToiwzjxf4-f166aU8"
 # }
-
-# eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOI1MGUwMmEzNS1hZTdkLTQyYzAtODE3NC0xY2FmNTVkNGYzNmYiLCJ0b2tlbl90eXBlIjoiYWNjZXNzIiwidmVyIjowLCJpYXQiOjE3OTExOTk1OTksImV4cCI6MTc5MjA5OTU5OX0.81WcwMogUAyj9tH0_VKGe0K8y84c-F3IwpgsIcPwTUQ
-
 # To +2348123456788: http://127.0.0.1:8000/activate?token=vzb-RjLhvzb7esD5tikO3GX81s2NDitxfHc8RXdIJ58
