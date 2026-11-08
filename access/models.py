@@ -23,7 +23,7 @@ class AttendanceRecord(models.Model):
             blank=True,)
     close_reason = models.CharField(max_length=128, blank= True , null=True)
     
-    class meta:
+    class Meta:
         constraints = [models.UniqueConstraint(fields=["user"], condition=Q(exited_at__isnull=True),
                 name="one_open_attendance_per_user",)]
         indexes = [models.Index(fields=["site", "exited_at"], name="attendance_site_open_idx")]
